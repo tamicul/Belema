@@ -1,4 +1,5 @@
 import Link from "next/link";
+import ui from "../ui.module.css";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { getDefaultOrgIdForUser } from "@/lib/org";
@@ -25,40 +26,51 @@ export default async function RunsPage() {
   });
 
   return (
-    <section>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <h1 style={{ fontSize: 22, margin: 0 }}>Runs</h1>
-        <Link href="/app/runs/new">New run</Link>
+    <section className={ui.page}>
+      <div className={ui.row} style={{ justifyContent: "space-between" }}>
+        <div className={ui.row}>
+          <h1 className={ui.h1} style={{ margin: 0 }}>
+            Runs
+          </h1>
+          <span className={`${ui.badge} ${ui.badgeOk}`}>Saved Search-first</span>
+        </div>
+        <Link className={`${ui.btn} ${ui.btnPrimary}`} href="/app/runs/new">
+          New run
+        </Link>
       </div>
 
-      <p style={{ color: "#555" }}>Execution history for sync jobs (Saved Search-first).</p>
+      <p className={ui.muted}>Execution history for sync jobs.</p>
 
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <div className={ui.tableWrap}>
+        <table className={ui.table}>
           <thead>
             <tr>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #eee", padding: 8 }}>Created</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #eee", padding: 8 }}>Kind</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #eee", padding: 8 }}>Status</th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #eee", padding: 8 }}>Error</th>
+              <th className={ui.th}>Created</th>
+              <th className={ui.th}>Kind</th>
+              <th className={ui.th}>Status</th>
+              <th className={ui.th}>Error</th>
             </tr>
           </thead>
           <tbody>
             {runs.map((r) => (
-              <tr key={r.id}>
-                <td style={{ borderBottom: "1px solid #f3f3f3", padding: 8 }}>
-                  <Link href={`/app/runs/${r.id}`}>{r.createdAt.toISOString()}</Link>
+              <tr key={r.id} className={ui.tr}>
+                <td className={ui.td} style={{ whiteSpace: "nowrap" }}>
+                  <Link className={ui.code} href={`/app/runs/${r.id}`}>
+                    {r.createdAt.toISOString()}
+                  </Link>
                 </td>
-                <td style={{ borderBottom: "1px solid #f3f3f3", padding: 8 }}>{r.kind}</td>
-                <td style={{ borderBottom: "1px solid #f3f3f3", padding: 8 }}>{r.status}</td>
-                <td style={{ borderBottom: "1px solid #f3f3f3", padding: 8, color: r.error ? "#b00020" : "#999" }}>
+                <td className={ui.td}>{r.kind}</td>
+                <td className={ui.td}>
+                  <span className={ui.badge}>{r.status}</span>
+                </td>
+                <td className={ui.td} style={{ color: r.error ? "#b00020" : "rgba(15,23,42,0.55)" }}>
                   {r.error ?? "—"}
                 </td>
               </tr>
             ))}
             {runs.length === 0 ? (
               <tr>
-                <td colSpan={4} style={{ padding: 12, color: "#666" }}>
+                <td colSpan={4} className={ui.td} style={{ color: "rgba(15,23,42,0.60)" }}>
                   No runs yet.
                 </td>
               </tr>

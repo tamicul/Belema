@@ -1,0 +1,108 @@
+.page{
+  display: grid;
+  gap: 16px;
+}
+
+.h1{
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.h2{
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: rgba(15,23,42,0.88);
+}
+
+.muted{ color: rgba(15,23,42,0.60); }
+
+.row{
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.card{
+  padding: 14px;
+  border: 1px solid rgba(15,23,42,0.10);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.75);
+}
+
+.kv{
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 8px 12px;
+  font-size: 14px;
+}
+
+.k{ color: rgba(15,23,42,0.60); }
+.v{ color: rgba(15,23,42,0.92); }
+
+.btn{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(15,23,42,0.12);
+  background: rgba(255,255,255,0.8);
+  font-size: 14px;
+}
+
+.btnPrimary{
+  border-color: rgba(99,102,241,0.35);
+  background: rgba(99,102,241,0.10);
+}
+
+.btn:hover{ filter: brightness(0.98); }
+
+.badge{
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid rgba(15,23,42,0.12);
+  background: rgba(255,255,255,0.75);
+}
+
+.badgeOk{ border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.12); }
+.badgeWarn{ border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.12); }
+.badgeBad{ border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.10); }
+
+.tableWrap{
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid rgba(15,23,42,0.10);
+}
+
+.table{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.th{
+  text-align: left;
+  padding: 10px 10px;
+  background: rgba(248,250,252,0.8);
+  border-bottom: 1px solid rgba(15,23,42,0.08);
+  color: rgba(15,23,42,0.75);
+  white-space: nowrap;
+}
+
+.td{
+  padding: 10px 10px;
+  border-bottom: 1px solid rgba(15,23,42,0.06);
+  vertical-align: top;
+}
+
+.tr:hover{ background: rgba(99,102,241,0.06); }
+
+.code{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
+
+.hr{ border: 0; border-top: 1px solid rgba(15,23,42,0.08); margin: 8px 0; }
