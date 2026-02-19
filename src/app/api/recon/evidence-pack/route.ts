@@ -1,10 +1,35 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-function reasonForMatch(payoutId: string, bankRef: string | null, bankDesc: string) {
-  if (bankRef && bankRef.trim() === payoutId) return "REFERENCE_EQUALS_PAYOUT_ID";
-  if (bankDesc.toUpperCase().includes(payoutId.toUpperCase())) return "DESCRIPTION_CONTAINS_PAYOUT_ID";
-  return "UNKNOWN";
+function asStrDecimal(x: unknown) {
+  try {
+    return (x as { toString: () => string }).toString();
+  } catch {
+    return String(x);
+  }
+}
+
+function normMoneyStr(s: string) {
+  // normalize decimals for string comparison (MVP assumes 2dp input)
+  const n = Number(s);
+  if (Number.isFinite(n)) return n.toFixed(2);
+  return s.trim();
+}
+
+function daysBetween(a: Date, b: Date) {
+  const ms = 24 * 60 * 60 * 1000;
+  return Math.floor((a.getTime() - b.getTime()) / ms);
+}
+
+function withinDays(a: Date, b: Date, windowDays: number) {
+  const d = Math.abs(daysBetween(a, b));
+  return d <= windowDays;
+}
+
+function reasonCodesForMatch(bankDesc: string) {
+  const codes: string[] = ["BANK_AMOUNT_DATE_MATCH"];
+  if (bankDesc.toUpperCase().includes("SHOPIFY")) codes.push("DESC_KEYWORD_SHOPIFY");
+  return codes;
 }
 
 export async function GET(req: Request) {
@@ -56,36 +81,50 @@ export async function GET(req: Request) {
 
   const exceptions: Array<{ type: string; detail: string }> = [];
 
+  // Deterministic MVP matcher:
+  // - bank amount must equal payout amount (exact for now)
+  // - postedDate within ±3 days of payoutDate
+  // - if multiple candidates => NEEDS_REVIEW (represented as exception)
+  const windowDays = 3;
+
   for (const p of payouts) {
-    const payoutAmountStr = (p.payoutAmount as unknown as { toString: () => string }).toString();
+    const payoutAmountStr = asStrDecimal(p.payoutAmount);
+    const payoutAmountNorm = normMoneyStr(payoutAmountStr);
 
-    const match = bankTxns.find(
-      (b) => (b.reference && b.reference.trim() === p.payoutId) || b.description.toUpperCase().includes(p.payoutId.toUpperCase())
-    );
+    const candidates = bankTxns.filter((b) => {
+      const bankAmountNorm = normMoneyStr(asStrDecimal(b.amount));
+      return bankAmountNorm === payoutAmountNorm && withinDays(b.postedDate, p.payoutDate, windowDays);
+    });
 
-    if (match) {
-      const bankAmountStr = (match.amount as unknown as { toString: () => string }).toString();
+    if (candidates.length === 1) {
+      const match = candidates[0];
       matches.push({
         payoutId: p.payoutId,
         payoutAmount: payoutAmountStr,
         payoutCurrency: p.payoutCurrency,
-        bankAmount: bankAmountStr,
+        bankAmount: asStrDecimal(match.amount),
         bankPostedDate: match.postedDate.toISOString().slice(0, 10),
         bankDescription: match.description,
         bankReference: match.reference,
-        reasonCode: reasonForMatch(p.payoutId, match.reference, match.description),
+        reasonCode: reasonCodesForMatch(match.description).join("|")
       });
-    } else {
+    } else if (candidates.length === 0) {
       exceptions.push({ type: "UNMATCHED_PAYOUT", detail: `${p.payoutId} (${p.payoutCurrency} ${payoutAmountStr})` });
+    } else {
+      exceptions.push({ type: "NEEDS_REVIEW", detail: `${p.payoutId}: multiple bank candidates (${candidates.length}) for amount ${payoutAmountStr}` });
     }
   }
 
   for (const b of bankTxns) {
-    const matched = payouts.some(
-      (p) => (b.reference && b.reference.trim() === p.payoutId) || b.description.toUpperCase().includes(p.payoutId.toUpperCase())
-    );
+    const bankAmountStr = asStrDecimal(b.amount);
+    const bankAmountNorm = normMoneyStr(bankAmountStr);
+
+    const matched = payouts.some((p) => {
+      const payoutAmountNorm = normMoneyStr(asStrDecimal(p.payoutAmount));
+      return payoutAmountNorm === bankAmountNorm && withinDays(b.postedDate, p.payoutDate, windowDays);
+    });
+
     if (!matched) {
-      const bankAmountStr = (b.amount as unknown as { toString: () => string }).toString();
       exceptions.push({
         type: "UNMATCHED_BANK_TXN",
         detail: `${b.postedDate.toISOString().slice(0, 10)} ${bankAmountStr} ${b.description}`,

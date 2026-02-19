@@ -2,6 +2,31 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { redirect } from "next/navigation";
+import ui from "../../ui.module.css";
+
+function asStrDecimal(x: unknown) {
+  try {
+    return (x as { toString: () => string }).toString();
+  } catch {
+    return String(x);
+  }
+}
+
+function normMoneyStr(s: string) {
+  const n = Number(s);
+  if (Number.isFinite(n)) return n.toFixed(2);
+  return s.trim();
+}
+
+function daysBetween(a: Date, b: Date) {
+  const ms = 24 * 60 * 60 * 1000;
+  return Math.floor((a.getTime() - b.getTime()) / ms);
+}
+
+function withinDays(a: Date, b: Date, windowDays: number) {
+  const d = Math.abs(daysBetween(a, b));
+  return d <= windowDays;
+}
 
 export default async function ReconRunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -45,34 +70,60 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
       })
     : [];
 
-  // Ultra-simple deterministic matcher for demo:
-  // - If bank.reference equals payoutId OR description contains payoutId, propose a match.
-  const proposed: Array<{ payoutId: string; payoutAmount: string; bankAmount: string; bankDesc: string }> = [];
+  // Deterministic MVP matcher:
+  // - bank amount must equal payout amount (exact for now)
+  // - postedDate within ±3 days of payoutDate
+  // - if multiple candidates => NEEDS_REVIEW
+  const windowDays = 3;
+
+  const proposed: Array<{
+    payoutId: string;
+    payoutAmount: string;
+    payoutCurrency: string;
+    bankAmount: string;
+    bankPostedDate: string;
+    bankDesc: string;
+    reason: string;
+  }> = [];
+
   const exceptions: Array<{ kind: string; detail: string }> = [];
 
   for (const p of payouts) {
-    const match = bankTxns.find(
-      (b) => (b.reference && b.reference.trim() === p.payoutId) || b.description.toUpperCase().includes(p.payoutId.toUpperCase())
-    );
-    const payoutAmountStr = (p.payoutAmount as unknown as { toString: () => string }).toString();
-    if (match) {
-      const bankAmountStr = (match.amount as unknown as { toString: () => string }).toString();
+    const payoutAmountStr = asStrDecimal(p.payoutAmount);
+    const payoutAmountNorm = normMoneyStr(payoutAmountStr);
+
+    const candidates = bankTxns.filter((b) => {
+      const bankAmountNorm = normMoneyStr(asStrDecimal(b.amount));
+      return bankAmountNorm === payoutAmountNorm && withinDays(b.postedDate, p.payoutDate, windowDays);
+    });
+
+    if (candidates.length === 1) {
+      const match = candidates[0];
       proposed.push({
         payoutId: p.payoutId,
         payoutAmount: payoutAmountStr,
-        bankAmount: bankAmountStr,
+        payoutCurrency: p.payoutCurrency,
+        bankAmount: asStrDecimal(match.amount),
+        bankPostedDate: match.postedDate.toISOString().slice(0, 10),
         bankDesc: match.description,
+        reason: match.description.toUpperCase().includes("SHOPIFY") ? "BANK_AMOUNT_DATE_MATCH|DESC_KEYWORD_SHOPIFY" : "BANK_AMOUNT_DATE_MATCH",
       });
-    } else {
+    } else if (candidates.length === 0) {
       exceptions.push({ kind: "UNMATCHED_PAYOUT", detail: `${p.payoutId} (${p.payoutCurrency} ${payoutAmountStr})` });
+    } else {
+      exceptions.push({ kind: "NEEDS_REVIEW", detail: `${p.payoutId}: multiple bank candidates (${candidates.length}) for amount ${payoutAmountStr}` });
     }
   }
 
   for (const b of bankTxns) {
-    const matched = payouts.some(
-      (p) => (b.reference && b.reference.trim() === p.payoutId) || b.description.toUpperCase().includes(p.payoutId.toUpperCase())
-    );
-    const bankAmountStr = (b.amount as unknown as { toString: () => string }).toString();
+    const bankAmountStr = asStrDecimal(b.amount);
+    const bankAmountNorm = normMoneyStr(bankAmountStr);
+
+    const matched = payouts.some((p) => {
+      const payoutAmountNorm = normMoneyStr(asStrDecimal(p.payoutAmount));
+      return payoutAmountNorm === bankAmountNorm && withinDays(b.postedDate, p.payoutDate, windowDays);
+    });
+
     if (!matched) {
       exceptions.push({
         kind: "UNMATCHED_BANK_TXN",
@@ -81,83 +132,128 @@ export default async function ReconRunPage({ params }: { params: Promise<{ id: s
     }
   }
 
+  const matchedPct = payouts.length ? Math.round((proposed.length / payouts.length) * 100) : 0;
+
   return (
-    <section>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h1 style={{ fontSize: 22 }}>Recon run</h1>
-        <Link href="/app/recon">All recon</Link>
+    <section className={ui.page}>
+      <div className={ui.row} style={{ justifyContent: "space-between" }}>
+        <div className={ui.row}>
+          <h1 className={ui.h1}>Recon run</h1>
+          <span className={`${ui.badge} ${ui.badgeWarn}`}>{run.status}</span>
+        </div>
+        <Link className={ui.btn} href="/app/recon">
+          All recon
+        </Link>
       </div>
 
-      <p style={{ color: "#666" }}>
-        Status: <strong>{run.status}</strong> · Kind: {run.kind}
-      </p>
+      <div className={ui.card}>
+        <div className={ui.kv}>
+          <div className={ui.k}>Run</div>
+          <div className={ui.v}>
+            <span className={ui.code}>{run.id}</span>
+          </div>
+          <div className={ui.k}>Kind</div>
+          <div className={ui.v}>{run.kind}</div>
+          <div className={ui.k}>Close readiness</div>
+          <div className={ui.v}>
+            Matched: <strong>{proposed.length}</strong>/<strong>{payouts.length}</strong> ({matchedPct}%) · Exceptions: {exceptions.length}
+          </div>
+        </div>
+      </div>
 
-      <h2 style={{ fontSize: 16, marginTop: 16 }}>Attached source files</h2>
-      <ul>
-        {run.sourceFiles.map((f) => (
-          <li key={f.id}>
-            <code>{f.type}</code> — {f.filename} — <span style={{ color: "#666" }}>{f.id}</span>
-          </li>
-        ))}
-      </ul>
-
-      <h2 style={{ fontSize: 16, marginTop: 16 }}>Proposed matches (demo)</h2>
-      {proposed.length === 0 ? (
-        <p style={{ color: "#666" }}>No matches yet. (For demo, ensure bank Reference or Description includes payout ID like PO-10001.)</p>
-      ) : (
-        <ul>
-          {proposed.map((m) => (
-            <li key={m.payoutId}>
-              <strong>{m.payoutId}</strong> — payout {m.payoutAmount} ↔ bank {m.bankAmount} ({m.bankDesc})
-            </li>
+      <div className={ui.card}>
+        <h2 className={ui.h2}>Attached source files</h2>
+        <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
+          {run.sourceFiles.map((f) => (
+            <div key={f.id} className={ui.row} style={{ justifyContent: "space-between" }}>
+              <div>
+                <span className={ui.badge}>{f.type}</span> <strong style={{ marginLeft: 8 }}>{f.filename}</strong>
+              </div>
+              <span className={`${ui.code} ${ui.muted}`}>{f.id}</span>
+            </div>
           ))}
-        </ul>
-      )}
+        </div>
+      </div>
 
-      <h2 style={{ fontSize: 16, marginTop: 16 }}>Exceptions</h2>
-      {exceptions.length === 0 ? (
-        <p style={{ color: "#666" }}>No exceptions.</p>
-      ) : (
-        <ul>
-          {exceptions.map((e, idx) => (
-            <li key={idx}>
-              <code>{e.kind}</code>: {e.detail}
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className={ui.card}>
+        <div className={ui.row} style={{ justifyContent: "space-between" }}>
+          <h2 className={ui.h2}>Proposed matches</h2>
+          <span className={`${ui.badge} ${proposed.length ? ui.badgeOk : ui.badgeWarn}`}>{proposed.length} matches</span>
+        </div>
 
-      <hr style={{ margin: "16px 0" }} />
+        {proposed.length === 0 ? (
+          <p className={ui.muted} style={{ marginTop: 8 }}>
+            No matches yet. Matching is deterministic: exact amount + ±3 day window.
+          </p>
+        ) : (
+          <div className={ui.tableWrap} style={{ marginTop: 10 }}>
+            <table className={ui.table}>
+              <thead>
+                <tr>
+                  <th className={ui.th}>Payout</th>
+                  <th className={ui.th}>Amount</th>
+                  <th className={ui.th}>Bank date</th>
+                  <th className={ui.th}>Bank desc</th>
+                  <th className={ui.th}>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {proposed.map((m) => (
+                  <tr key={m.payoutId} className={ui.tr}>
+                    <td className={ui.td}><span className={ui.code}>{m.payoutId}</span></td>
+                    <td className={ui.td}>{m.payoutCurrency} {m.payoutAmount}</td>
+                    <td className={ui.td}>{m.bankPostedDate}</td>
+                    <td className={ui.td}>{m.bankDesc}</td>
+                    <td className={ui.td}><span className={ui.code}>{m.reason}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <a
-          href={`/api/recon/evidence-pack.pdf?runId=${encodeURIComponent(run.id)}`}
-          style={{
-            display: "inline-block",
-            padding: 10,
-            border: "1px solid #111",
-            borderRadius: 10,
-            background: "rgba(255,255,255,0.7)",
-          }}
-        >
+      <div className={ui.card}>
+        <div className={ui.row} style={{ justifyContent: "space-between" }}>
+          <h2 className={ui.h2}>Exceptions</h2>
+          <span className={`${ui.badge} ${exceptions.length ? ui.badgeBad : ui.badgeOk}`}>{exceptions.length} items</span>
+        </div>
+
+        {exceptions.length === 0 ? (
+          <p className={ui.muted} style={{ marginTop: 8 }}>No exceptions.</p>
+        ) : (
+          <div className={ui.tableWrap} style={{ marginTop: 10 }}>
+            <table className={ui.table}>
+              <thead>
+                <tr>
+                  <th className={ui.th}>Type</th>
+                  <th className={ui.th}>Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {exceptions.map((e, idx) => (
+                  <tr key={idx} className={ui.tr}>
+                    <td className={ui.td}><span className={ui.badge}>{e.kind}</span></td>
+                    <td className={ui.td}>{e.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className={ui.row}>
+        <a className={`${ui.btn} ${ui.btnPrimary}`} href={`/api/recon/evidence-pack.pdf?runId=${encodeURIComponent(run.id)}`}>
           Download Evidence Pack (PDF)
         </a>
-        <a
-          href={`/api/recon/evidence-pack?runId=${encodeURIComponent(run.id)}`}
-          style={{
-            display: "inline-block",
-            padding: 10,
-            border: "1px solid #111",
-            borderRadius: 10,
-            background: "rgba(255,255,255,0.7)",
-          }}
-        >
+        <a className={ui.btn} href={`/api/recon/evidence-pack?runId=${encodeURIComponent(run.id)}`}>
           Download Evidence Pack (JSON)
         </a>
       </div>
 
-      <p style={{ color: "#666", marginTop: 12 }}>
-        Next: immutable audit log view + persisted match results (MatchResult) for stable, repeatable runs.
+      <p className={ui.muted}>
+        Next: persist MatchResult + review actions (approve/reject) so runs are stable and repeatable.
       </p>
     </section>
   );
