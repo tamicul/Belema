@@ -1,0 +1,23 @@
+name: Deploy Belema (prod)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: belema-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted]
+    steps:
+      - name: Deploy on droplet
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /opt/belema
+          git pull
+          docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+          curl -fsS http://localhost:3000/api/health
