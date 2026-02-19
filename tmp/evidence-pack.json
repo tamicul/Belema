@@ -1,0 +1,67 @@
+{
+  "ok": true,
+  "meta": {
+    "product": "Belema",
+    "generatedAt": "2026-02-17T04:13:01.255Z",
+    "copyright": "© 2026 Tambo Consulting LLC. All rights reserved.",
+    "confidentiality": "Confidential — do not distribute."
+  },
+  "org": {
+    "id": "cmli5r27200010bwikjnvk5zj",
+    "slug": "acme",
+    "name": "Acme"
+  },
+  "run": {
+    "id": "8f966fea-237e-4037-afd2-0f16b4d875ef",
+    "kind": "BANK_RECONCILIATION",
+    "status": "QUEUED",
+    "createdAt": "2026-02-17T04:13:00.481Z",
+    "updatedAt": "2026-02-17T04:13:00.481Z"
+  },
+  "sources": {
+    "shopify": {
+      "id": "cmlq386bv0001nq48xa9kr5td",
+      "filename": "shopify_payouts.csv",
+      "uploadedAt": "2026-02-17T04:13:00.043Z"
+    },
+    "bank": {
+      "id": "cmlq386f0000lnq48x2ue019f",
+      "filename": "bank_statement.csv",
+      "uploadedAt": "2026-02-17T04:13:00.156Z"
+    }
+  },
+  "summary": {
+    "payoutsCount": 2,
+    "bankTxnsCount": 3,
+    "matchesCount": 2,
+    "exceptionsCount": 1
+  },
+  "matches": [
+    {
+      "payoutId": "PO-10001",
+      "payoutAmount": "1200",
+      "payoutCurrency": "USD",
+      "bankAmount": "1200",
+      "bankPostedDate": "2026-02-15",
+      "bankDescription": "Shopify Payout PO-10001",
+      "bankReference": "PO-10001",
+      "reasonCode": "REFERENCE_EQUALS_PAYOUT_ID"
+    },
+    {
+      "payoutId": "PO-10002",
+      "payoutAmount": "850",
+      "payoutCurrency": "USD",
+      "bankAmount": "850",
+      "bankPostedDate": "2026-02-16",
+      "bankDescription": "Deposit - Shopify PO-10002",
+      "bankReference": "PO-10002",
+      "reasonCode": "REFERENCE_EQUALS_PAYOUT_ID"
+    }
+  ],
+  "exceptions": [
+    {
+      "type": "UNMATCHED_BANK_TXN",
+      "detail": "2026-02-16 -10 Bank fee"
+    }
+  ]
+}

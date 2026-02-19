@@ -1,0 +1,422 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum AuditAction {
+  AUTH_SIGNIN
+  AUTH_SIGNOUT
+  ORG_CREATED
+  ORG_MEMBER_INVITED
+  ORG_MEMBER_ROLE_CHANGED
+  ORG_MEMBER_REMOVED
+  CONNECTOR_CREATED
+  CONNECTOR_UPDATED
+  CONNECTOR_DELETED
+  SAVED_SEARCH_CREATED
+  SAVED_SEARCH_UPDATED
+  SAVED_SEARCH_DELETED
+  SYNC_RUN_CREATED
+  SYNC_RUN_STARTED
+  SYNC_RUN_SUCCEEDED
+  SYNC_RUN_FAILED
+}
+
+enum ConnectorType {
+  NETSUITE
+  BANK_AGGREGATOR
+}
+
+enum SyncRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+enum ReconRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+enum SourceFileType {
+  SHOPIFY_PAYOUTS_CSV
+  BANK_STATEMENT_CSV
+}
+
+enum ImportRowStatus {
+  OK
+  WARNING
+  ERROR
+}
+
+enum MatchStatus {
+  MATCHED
+  NEEDS_REVIEW
+  REJECTED
+  PROPOSED
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String? // for dev credentials; prefer SSO/magic link in prod
+
+  accounts Account[]
+  sessions Session[]
+
+  memberships Membership[]
+  auditEvents AuditEvent[] @relation("AuditActor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Organization {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  memberships Membership[]
+  connectors  Connector[]
+  auditEvents AuditEvent[]
+  syncRuns    SyncRun[]
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  reconciliationRuns ReconciliationRun[]
+  sourceFiles        SourceFile[]
+}
+
+model Membership {
+  id        String       @id @default(cuid())
+  orgId     String
+  userId    String
+  role      OrgRole      @default(MEMBER)
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  @@unique([orgId, userId])
+  @@index([userId])
+  @@index([orgId])
+}
+
+// --- NextAuth / Auth.js models ---
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// --- Belema core ---
+model AuditEvent {
+  id         String      @id @default(cuid())
+  orgId      String
+  actorId    String?
+  action     AuditAction
+  targetType String?
+  targetId   String?
+  summary    String
+  metadata   Json?
+  ip         String?
+  userAgent  String?
+
+  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  actor User?        @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model Connector {
+  id         String        @id @default(cuid())
+  orgId      String
+  type       ConnectorType
+  name       String
+  status     String        @default("ACTIVE")
+  config     Json          @default("{}") // non-secret config
+  secretsRef String? // reference to secret store (placeholder)
+
+  org           Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  savedSearches NetSuiteSavedSearch[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+// Saved Search-first integration path: treat Saved Searches as declarative sync sources.
+model NetSuiteSavedSearch {
+  id              String  @id @default(cuid())
+  connectorId     String
+  name            String
+  recordType      String? // informational (e.g., Transaction, VendorPayment)
+  searchId        String // NetSuite internalId for the saved search
+  description     String?
+  isEnabled       Boolean @default(true)
+  // expected columns (for mapping/validation): [{key,label,type}]
+  expectedColumns Json?
+
+  connector Connector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([connectorId, searchId])
+  @@index([connectorId])
+}
+
+model SyncRun {
+  id          String        @id @default(cuid())
+  orgId       String
+  connectorId String?
+  status      SyncRunStatus @default(QUEUED)
+  kind        String // e.g., "NETSUITE_SAVED_SEARCH_SYNC"
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  // small, queryable counters
+  stats Json    @default("{}")
+  error String?
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId, createdAt])
+  @@index([status, createdAt])
+}
+
+// --- Reconciliation / imports (MVP: Shopify payouts CSV + Bank statement CSV) ---
+model ReconciliationRun {
+  id     String         @id @default(cuid())
+  orgId  String
+  status ReconRunStatus @default(QUEUED)
+  kind   String         @default("BANK_RECONCILIATION")
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  stats Json    @default("{}")
+  error String?
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  sourceFiles SourceFile[]
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  matchResults MatchResult[]
+
+  @@index([orgId, createdAt])
+  @@index([status, createdAt])
+}
+
+model SourceFile {
+  id    String         @id @default(cuid())
+  orgId String
+  runId String?
+  type  SourceFileType
+
+  filename  String
+  mimeType  String?
+  sizeBytes Int?
+  sha256    String?
+
+  uploadedAt DateTime @default(now())
+  storageKey String? // future: S3/object-store key
+
+  org Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  run ReconciliationRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  rawRows     ImportedRowRaw[]
+  payouts     ExternalPayout[]
+  payoutLines ExternalPayoutLine[]
+  bankTxns    ExternalBankTxn[]
+
+  @@index([orgId, uploadedAt])
+  @@index([runId])
+  @@index([type])
+}
+
+model ImportedRowRaw {
+  id           String          @id @default(cuid())
+  orgId        String
+  runId        String?
+  sourceFileId String
+  rowNumber    Int
+  status       ImportRowStatus @default(OK)
+
+  raw      Json
+  parsed   Json?
+  messages Json? // [{level, code, message}]
+
+  sourceFile SourceFile @relation(fields: [sourceFileId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([sourceFileId, rowNumber])
+  @@index([orgId, createdAt])
+  @@index([runId])
+}
+
+model ExternalPayout {
+  id           String  @id @default(cuid())
+  orgId        String
+  runId        String?
+  sourceFileId String
+
+  payoutId       String
+  payoutStatus   String
+  payoutDate     DateTime
+  payoutMonth    String?
+  payoutCurrency String
+  payoutAmount   Decimal  @db.Decimal(18, 2)
+
+  warnings Json?
+
+  sourceFile SourceFile           @relation(fields: [sourceFileId], references: [id], onDelete: Cascade)
+  lines      ExternalPayoutLine[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([sourceFileId, payoutId])
+  @@index([orgId, payoutDate])
+  @@index([runId])
+  @@index([payoutId])
+}
+
+model ExternalPayoutLine {
+  id           String  @id @default(cuid())
+  orgId        String
+  runId        String?
+  sourceFileId String
+  payoutDbId   String
+
+  txnId          String
+  txnType        String
+  txnProcessedAt DateTime?
+  txnCurrency    String?
+
+  raw Json?
+
+  sourceFile SourceFile     @relation(fields: [sourceFileId], references: [id], onDelete: Cascade)
+  payout     ExternalPayout @relation(fields: [payoutDbId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([runId])
+  @@index([txnId])
+  @@index([payoutDbId])
+}
+
+model ExternalBankTxn {
+  id           String  @id @default(cuid())
+  orgId        String
+  runId        String?
+  sourceFileId String
+
+  postedDate    DateTime
+  description   String
+  reference     String?
+  sortCode      String?
+  accountNumber String?
+
+  moneyIn  Decimal  @db.Decimal(18, 2)
+  moneyOut Decimal  @db.Decimal(18, 2)
+  amount   Decimal  @db.Decimal(18, 2) // derived: moneyIn - moneyOut
+  balance  Decimal? @db.Decimal(18, 2)
+
+  raw Json?
+
+  sourceFile SourceFile @relation(fields: [sourceFileId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([orgId, postedDate])
+  @@index([runId])
+  @@index([amount])
+}
+
+model MatchResult {
+  id    String @id @default(cuid())
+  orgId String
+  runId String
+
+  leftType       String
+  leftId         String
+  leftExternalId String?
+
+  rightType       String
+  rightId         String
+  rightExternalId String?
+
+  status      MatchStatus
+  method      String?
+  reasonCodes String[]
+  score       Int?
+  explanation String?
+
+  createdAt DateTime @default(now())
+
+  run ReconciliationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@index([runId])
+  @@index([status])
+}

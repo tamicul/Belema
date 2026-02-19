@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-belema}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-belema}
+      POSTGRES_DB: ${POSTGRES_DB:-belema}
+    volumes:
+      - belema_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+
+      # optional seed-on-start
+      BELEMA_SEED_ON_START: ${BELEMA_SEED_ON_START:-false}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@belema.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-password}
+      SEED_ORG_NAME: ${SEED_ORG_NAME:-Acme}
+      SEED_ORG_SLUG: ${SEED_ORG_SLUG:-acme}
+
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+volumes:
+  belema_pgdata:
